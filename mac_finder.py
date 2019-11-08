@@ -14,10 +14,6 @@ if euid != 0:
 
 
 def get_ip_address(ifname):
-    """
-    Get IP Address
-    """
-
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     return socket.inet_ntoa(fcntl.ioctl(
         s.fileno(),
@@ -27,27 +23,27 @@ def get_ip_address(ifname):
 
 
 def run_nmap():
-    """
-    Run Nmap to find MAC Address of all devices connected to the same network
-    """
-
     host = None
     if sys.argv[1].lower() == 'ethernet':
-        host = get_ip_address('eno1')
+        host = get_ip_address('enp2s0')
     elif sys.argv[1].lower() == 'wifi':
-        host = get_ip_address('wlo1')
-    print(f'Host IP: {host}')
+        host = get_ip_address('wlp1s0')
+    # print(f'Host IP: {host}')
+    print(host)
     temp = host.split('.')
     temp.pop()
 
     _ip = '.'.join(temp)
 
     nm = nmap.PortScanner()
-    nm.scan(hosts=f'{_ip}.0/24', arguments='-sn')
+    hosts = _ip + '.0/24'
+    print(hosts)
+    nm.scan(hosts=hosts, arguments='-sn')
 
     ipv4_data = []
     ipv6_data = []
     for host in nm.all_hosts():
+        # print(nm[host])
         mac_address = None
         device = 'Unknown'
         if 'mac' in nm[host]['addresses']:
@@ -65,19 +61,15 @@ def run_nmap():
 
 
 def run():
-    """
-    go, go, go
-    """
-
     ipv4_data, ipv6_data = run_nmap()
     if ipv4_data:
         print('ipv4')
         for ip in ipv4_data:
-            print(f'{ip}')
+            print(ip)
     if ipv6_data:
         print('ipv6')
         for ip in ipv6_data:
-            print(f'{ip}')
+            print(ip)
 
 
 if __name__ == '__main__':
