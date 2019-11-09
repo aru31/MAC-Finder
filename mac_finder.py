@@ -14,6 +14,7 @@ if euid != 0:
 
 
 def get_ip_address(ifname):
+    """ Get IP """
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     return socket.inet_ntoa(fcntl.ioctl(
         s.fileno(),
@@ -23,11 +24,13 @@ def get_ip_address(ifname):
 
 
 def run_nmap():
+    """ Run NMAP """
+
     host = None
     if sys.argv[1].lower() == 'ethernet':
-        host = get_ip_address('enp2s0')
+        host = get_ip_address('eno1')
     elif sys.argv[1].lower() == 'wifi':
-        host = get_ip_address('wlp1s0')
+        host = get_ip_address('wlo1')
     # print(f'Host IP: {host}')
     print(host)
     temp = host.split('.')
@@ -61,6 +64,8 @@ def run_nmap():
 
 
 def run():
+    """ Go, go, go """
+
     ipv4_data, ipv6_data = run_nmap()
     if ipv4_data:
         print('ipv4')

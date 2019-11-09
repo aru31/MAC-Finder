@@ -9,8 +9,9 @@ pip3 install -r requirements.txt
 ```
 then
 ```
-python3 mac_finder.py <argument>
+python3 runner.py
 ```
 
 <br>
-Get all the mac addresses connected to a the same network. :)
+Hope you like it. :)
+

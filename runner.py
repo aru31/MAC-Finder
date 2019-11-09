@@ -4,44 +4,28 @@ import os
 import os.path
 import platform
 import subprocess
-import json
 import time
-
-import netifaces
 import click
 
-# from howmanypeoplearearound.oui import load_dictionary, download_oui
-# from howmanypeoplearearound.analysis import analyze_file
-# from howmanypeoplearearound.colors import *
 
-# try: #python3
-#     from urllib.request import urlopen
-# except: #python2
-#     from urllib2 import urlopen
+euid = os.geteuid()
+if euid != 0:
+    print("Script not started as root. Running sudo...")
+    args = ['sudo', sys.executable] + sys.argv + [os.environ]
+    os.execlpe('sudo', *args)
 
 
-# def load_dictionary(file):
-#     oui = {}
-#     with open(file, 'r') as f:
-#         for line in f:
-#             if '(hex)' in line:
-#                 data = line.split('(hex)')
-#                 key = data[0].replace('-', ':').lower().strip()
-#                 company = data[1].strip()
-#                 oui[key] = company
-#     return oui
+def load_dictionary(file):
+    oui = {}
+    with open(file, 'r') as f:
+        for line in f:
+            if '(hex)' in line:
+                data = line.split('(hex)')
+                key = data[0].replace('-', ':').lower().strip()
+                company = data[1].strip()
+                oui[key] = company
+    return oui
 
-
-# def download_oui(to_file):
-#     uri = 'http://standards-oui.ieee.org/oui/oui.txt'
-#     print("Trying to download current version of oui.txt from [%s] to file [%s]" % (uri, to_file))
-#     oui_data = urlopen(uri, timeout=10).read()
-#     with open(to_file, 'wb') as oui_file:
-#         oui_file.write(oui_data)
-
-if os.name != 'nt':
-    from pick import pick
-    import curses
 
 def which(program):
     """Determines whether program exists
@@ -67,7 +51,6 @@ def showTimer(timeleft):
     total = int(timeleft) * 10
     for i in range(total):
         sys.stdout.write('\r')
-        # the exact output you're looking for:
         timeleft_string = '%ds left' % int((total - i + 1) / 10)
         if (total - i + 1) > 600:
             timeleft_string = '%dmin %ds left' % (
@@ -78,113 +61,46 @@ def showTimer(timeleft):
         time.sleep(0.1)
     print("")
 
-def fileToMacSet(path):
-    with open(path, 'r') as f:
-        maclist = f.readlines()
-    return set([x.strip() for x in maclist])
 
 @click.command()
-@click.option('-a', '--adapter', default='', help='adapter to use')
-@click.option('-z', '--analyze', default='', help='analyze file')
-@click.option('-s', '--scantime', default='60', help='time in seconds to scan')
-@click.option('-o', '--out', default='', help='output cellphone data to file')
-@click.option('-d', '--dictionary', default='oui.txt', help='OUI dictionary')
-@click.option('-v', '--verbose', help='verbose mode', is_flag=True)
-@click.option('--number', help='just print the number', is_flag=True)
-@click.option('-j', '--jsonprint', help='print JSON of cellphone data', is_flag=True)
-@click.option('-n', '--nearby', help='only quantify signals that are nearby (rssi > -70)', is_flag=True)
-@click.option('--allmacaddresses', help='do not check MAC addresses against the OUI database to only recognize known cellphone manufacturers', is_flag=True)  # noqa
-@click.option('-m', '--manufacturers', default='', help='read list of known manufacturers from file')
-@click.option('--nocorrection', help='do not apply correction', is_flag=True)
 @click.option('--loop', help='loop forever', is_flag=True)
-@click.option('--port', default=8001, help='port to use when serving analysis')
-@click.option('--sort', help='sort cellphone data by distance (rssi)', is_flag=True)
-@click.option('--targetmacs', help='read a file that contains target MAC addresses', default='')
-@click.option('-f', '--pcap', help='read a pcap file instead of capturing')
-def main(adapter, scantime, verbose, dictionary, number, nearby, jsonprint, out, allmacaddresses, manufacturers, nocorrection, loop, analyze, port, sort, targetmacs, pcap):
-    if analyze != '':
-        # analyze_file(analyze, port)
-        return
+@click.option('-s', '--scantime', default='60', help='time in seconds to scan')
+def main(scantime, loop):
+    """ Run the main command line function """
     if loop:
         while True:
-            adapter = scan(adapter, scantime, verbose, dictionary, number,
-                 nearby, jsonprint, out, allmacaddresses, manufacturers, nocorrection, loop, sort, targetmacs, pcap)
+            adapter = scan(scantime)
     else:
-        scan(adapter, scantime, verbose, dictionary, number,
-             nearby, jsonprint, out, allmacaddresses, manufacturers, nocorrection, loop, sort, targetmacs, pcap)
+        scan(scantime)
 
 
-def scan(adapter, scantime, verbose, dictionary, number, nearby, jsonprint, out, allmacaddresses, manufacturers, nocorrection, loop, sort, targetmacs, pcap):
-    """Monitor wifi signals to count the number of people around you"""
+def scan(scantime):
+    """ Monitor wifi signals """
 
-    # print("OS: " + os.name)
-    # print("Platform: " + platform.system())
+    print("OS: " + os.name)
+    print("Platform: " + platform.system())
+    oui = load_dictionary('oui.txt')
 
-    # if (not os.path.isfile(dictionary)) or (not os.access(dictionary, os.R_OK)):
-    #     download_oui(dictionary)
+    tshark = which("tshark")
 
-    # oui = load_dictionary(dictionary)
+    adapter = 'wlo1mon'
+    print("Using %s adapter and scanning for %s seconds..." %
+          (adapter, scantime))
 
-    # if not oui:
-    #     print('couldn\'t load [%s]' % dictionary)
-    #     sys.exit(1)
+    t1 = threading.Thread(target=showTimer, args=(scantime,))
+    t1.daemon = True
+    t1.start()
 
-    try:
-        tshark = which("tshark")
-    except:
-        if platform.system() != 'Darwin':
-            print('tshark not found, install using\n\napt-get install tshark\n')
-        else:
-            print('wireshark not found, install using: \n\tbrew install wireshark')
-            print(
-                'you may also need to execute: \n\tbrew cask install wireshark-chmodbpf')
-        sys.exit(1)
+    dump_file = '/tmp/tshark-temp'
+    command = [tshark, '-I', '-i', adapter, '-a',
+               'duration: ' + scantime, '-w', dump_file]
 
-    if jsonprint:
-        number = True
-    if number:
-        verbose = False
+    run_tshark = subprocess.Popen(
+        command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    stdout, nothing = run_tshark.communicate()
 
-    if not pcap:
-        if len(adapter) == 0:
-            if os.name == 'nt':
-                print('You must specify the adapter with   -a ADAPTER')
-                print('Choose from the following: ' +
-                      ', '.join(netifaces.interfaces()))
-                sys.exit(1)
-            title = 'Please choose the adapter you want to use: '
-            try:
-                adapter, index = pick(netifaces.interfaces(), title)
-            except curses.error as e:
-                print('Please check your $TERM settings: %s' % (e))
-                sys.exit(1)
+    t1.join()
 
-        print("Using %s adapter and scanning for %s seconds..." %
-              (adapter, scantime))
-
-        if not number:
-            # Start timer
-            t1 = threading.Thread(target=showTimer, args=(scantime,))
-            t1.daemon = True
-            t1.start()
-
-        dump_file = '/tmp/tshark-temp'
-        # Scan with tshark
-        command = [tshark, '-I', '-i', adapter, '-a',
-                   'duration:' + scantime, '-w', dump_file]
-        if verbose:
-            print(' '.join(command))
-        run_tshark = subprocess.Popen(
-            command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-        stdout, nothing = run_tshark.communicate()
-
-
-        if not number:
-            t1.join()
-    else:
-        dump_file = pcap
-
-    # Read tshark output
     command = [
         tshark, '-r',
         dump_file, '-T',
@@ -193,21 +109,13 @@ def scan(adapter, scantime, verbose, dictionary, number, nearby, jsonprint, out,
         'wlan.bssid', '-e',
         'radiotap.dbm_antsignal'
     ]
-    if verbose:
-        print(' '.join(command))
+
     run_tshark = subprocess.Popen(
         command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     output, nothing = run_tshark.communicate()
 
-    # read target MAC address
-    targetmacset = set()
-    if targetmacs != '':
-        targetmacset = fileToMacSet(targetmacs)
-
     foundMacs = {}
     for line in output.decode('utf-8').split('\n'):
-        if verbose:
-            print(line)
         if line.strip() == '':
             continue
         mac = line.split()[0].strip().split(',')[0]
@@ -231,79 +139,13 @@ def scan(adapter, scantime, verbose, dictionary, number, nearby, jsonprint, out,
     for key, value in foundMacs.items():
         foundMacs[key] = float(sum(value)) / float(len(value))
 
-    # Find target MAC address in foundMacs
-    if targetmacset:
-        sys.stdout.write(RED)
-        for mac in foundMacs:
-            if mac in targetmacset:
-                print("Found MAC address: %s" % mac)
-                print("rssi: %s" % str(foundMacs[mac]))
-        sys.stdout.write(RESET)
-
-    if manufacturers:
-        f = open(manufacturers,'r')
-        cellphone = [line.rstrip('\n') for line in f.readlines()]
-        f.close()
-    else:
-        cellphone = [
-            'Motorola Mobility LLC, a Lenovo Company',
-            'GUANGDONG OPPO MOBILE TELECOMMUNICATIONS CORP.,LTD',
-            'Huawei Symantec Technologies Co.,Ltd.',
-            'Microsoft',
-            'HTC Corporation',
-            'Samsung Electronics Co.,Ltd',
-            'SAMSUNG ELECTRO-MECHANICS(THAILAND)',
-            'BlackBerry RTS',
-            'LG ELECTRONICS INC',
-            'Apple, Inc.',
-            'LG Electronics',
-            'OnePlus Tech (Shenzhen) Ltd',
-            'Xiaomi Communications Co Ltd',
-            'LG Electronics (Mobile Communications)']
-
-    cellphone_people = []
     for mac in foundMacs:
         oui_id = 'Not in OUI'
         if mac[:8] in oui:
             oui_id = oui[mac[:8]]
-        if verbose:
-            print(mac, oui_id, oui_id in cellphone)
-        if allmacaddresses or oui_id in cellphone:
-            if not nearby or (nearby and foundMacs[mac] > -70):
-                cellphone_people.append(
-                    {'company': oui_id, 'rssi': foundMacs[mac], 'mac': mac})
-    if sort:
-        cellphone_people.sort(key=lambda x: x['rssi'], reverse=True)
-    if verbose:
-        print(json.dumps(cellphone_people, indent=2))
+        print(f'company: {oui_id}, mac: {mac} ' + str(foundMacs[mac]))
 
-    # US / Canada: https://twitter.com/conradhackett/status/701798230619590656
-    percentage_of_people_with_phones = 0.7
-    if nocorrection:
-        percentage_of_people_with_phones = 1
-    num_people = int(round(len(cellphone_people) /
-                           percentage_of_people_with_phones))
-
-    if number and not jsonprint:
-        print(num_people)
-    elif jsonprint:
-        print(json.dumps(cellphone_people, indent=2))
-    else:
-        if num_people == 0:
-            print("No one around (not even you!).")
-        elif num_people == 1:
-            print("No one around, but you.")
-        else:
-            print("There are about %d people around." % num_people)
-
-    if out:
-        with open(out, 'a') as f:
-            data_dump = {'cellphones': cellphone_people, 'time': time.time()}
-            f.write(json.dumps(data_dump) + "\n")
-        if verbose:
-            print("Wrote %d records to %s" % (len(cellphone_people), out))
-    if not pcap:
-        os.remove(dump_file)
+    os.remove(dump_file)
     return adapter
 
 
